@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAPture</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <h1><b>CAP</b>ture</h1>
+    <div class="spacer"></div>
+    <div class="actions-top">
+        <button id="shot" class="primary" hidden data-i18n="header.screenshot">Take screenshot</button>
+        <span class="folder"><span data-i18n="header.folder">Folder:</span> <b id="folder-label">-</b></span>
+        <button id="change-folder" data-i18n="header.changeFolder">Change folder</button>
+        <button id="open-widget" class="primary" data-i18n="header.widget">Open widget</button>
+        <button id="open-settings" data-i18n="header.settings">Settings</button>
+        <button id="open-privacy" data-i18n="header.privacy">Privacy</button>
+    </div>
+</header>
+
+<section id="gate" class="gate" hidden>
+    <h2 id="gate-title"></h2>
+    <p id="gate-text"></p>
+    <div class="gate-buttons">
+        <button id="gate-primary" class="primary"></button>
+        <button id="gate-secondary" hidden></button>
+    </div>
+</section>
+
+<main id="app" hidden>
+    <div class="toolbar">
+        <select id="day-select" data-i18n-aria="toolbar.day" aria-label="Day"></select>
+        <button class="chip" data-filter="all" aria-pressed="true" data-i18n="filter.all">All</button>
+        <button class="chip" data-filter="speech" aria-pressed="false" data-i18n="filter.speech">Speech</button>
+        <button class="chip" data-filter="screenshot" aria-pressed="false" data-i18n="filter.screenshot">Screenshots</button>
+        <button class="chip" data-filter="file" aria-pressed="false" data-i18n="filter.file">Files</button>
+        <button class="chip" data-filter="note" aria-pressed="false" data-i18n="filter.note">Notes</button>
+        <span class="sep" aria-hidden="true"></span>
+        <button class="chip" data-filter="included" aria-pressed="false" data-i18n="filter.included">Will be exported</button>
+        <button class="chip" data-filter="excluded" aria-pressed="false" data-i18n="filter.excluded">Left out</button>
+        <input id="search" type="search" class="search" data-i18n-placeholder="toolbar.search" data-i18n-aria="toolbar.search" placeholder="Search text">
+        <div class="spacer"></div>
+        <button id="purge" hidden data-i18n="toolbar.purge">Remove deleted for good</button>
+        <button id="delete-day" class="danger" data-i18n="toolbar.deleteDay">Delete day</button>
+    </div>
+
+    <p id="day-warning" class="warning" hidden data-i18n="warning.readOnly"></p>
+
+    <details id="cleanup" class="cleanup">
+        <summary data-i18n="range.title">Clean up by time</summary>
+        <div class="cleanup-row">
+            <label><span data-i18n="range.from">From</span> <input id="range-from" type="time"></label>
+            <label><span data-i18n="range.to">To</span> <input id="range-to" type="time"></label>
+            <button id="range-select" data-i18n="range.select">Select items in range</button>
+        </div>
+        <div class="cleanup-row">
+            <label><span data-i18n="range.lastMinutes">Select everything from the last</span>
+                <input id="last-minutes" type="number" min="1" max="600" value="30"> <span data-i18n="range.minutes">minutes</span></label>
+            <button id="last-select" data-i18n="range.deleteLast">Select</button>
+        </div>
+    </details>
+
+    <form id="note-form" class="note-form">
+        <input id="note-input" type="text" data-i18n-placeholder="note.placeholder" data-i18n-aria="note.add" placeholder="Add a note to today">
+        <button type="submit" data-i18n="note.add">Add note</button>
+    </form>
+
+    <div class="drop" id="drop">
+        <span data-i18n="drop.text">Drop files here to add them to today, or</span>
+        <label class="file-label"><span data-i18n="drop.choose">choose files</span><input id="file-input" type="file" multiple></label>
+    </div>
+
+    <div id="bulk" class="bulk" hidden>
+        <strong id="bulk-count"></strong>
+        <button id="bulk-private" data-i18n="bulk.private">Mark private</button>
+        <button id="bulk-unprivate" data-i18n="bulk.unprivate">Remove private</button>
+        <button id="bulk-delete" class="danger" data-i18n="bulk.delete">Delete</button>
+        <button id="bulk-restore" data-i18n="bulk.restore">Restore</button>
+        <button id="bulk-clear" data-i18n="bulk.clear">Clear selection</button>
+    </div>
+    <div class="selectall"><label><input id="select-all" type="checkbox"> <span data-i18n="bulk.selectAll">Select all shown</span></label></div>
+
+    <ul class="timeline" id="timeline"></ul>
+    <div class="empty" id="empty"></div>
+</main>
+
+<footer id="bar" hidden>
+    <div class="bar-text">
+        <strong id="bar-main"></strong>
+        <span id="bar-detail"></span>
+    </div>
+    <button id="export-more" data-i18n="bar.more">Export several days...</button>
+    <button id="zip-main" class="primary" data-i18n="bar.approve">Approve and download ZIP</button>
+</footer>
+
+<dialog id="settings-dialog" class="dialog">
+    <h2 data-i18n="settings.title">Settings</h2>
+    <div class="form">
+        <label><span data-i18n="settings.speechLang">Speech language</span>
+            <select id="set-speech-lang"><option value="nl-NL" data-i18n="settings.lang.nl">Dutch</option><option value="en-US" data-i18n="settings.lang.en">English</option></select></label>
+        <label><span data-i18n="settings.uiLang">Interface language</span>
+            <select id="set-ui-lang"><option value="en">English</option><option value="nl">Nederlands</option></select></label>
+        <label><span data-i18n="settings.imageFormat">Screenshot format</span>
+            <select id="set-format"><option value="jpeg" data-i18n="settings.format.jpeg">JPEG</option><option value="webp" data-i18n="settings.format.webp">WebP</option><option value="png" data-i18n="settings.format.png">PNG</option></select></label>
+        <label><span data-i18n="settings.imageQuality">Screenshot quality</span>
+            <input id="set-quality" type="range" min="0.4" max="1" step="0.05"> <output id="set-quality-out"></output></label>
+        <label><span data-i18n="settings.captureMode">Screenshot area</span>
+            <select id="set-capture-mode"><option value="screen" data-i18n="settings.mode.screen">Whole screen</option><option value="window" data-i18n="settings.mode.window">One window</option><option value="tab" data-i18n="settings.mode.tab">A browser tab</option><option value="region" data-i18n="settings.mode.region">A rectangle</option><option value="ask" data-i18n="settings.mode.ask">No default: ask every time</option></select></label>
+        <p class="muted" data-i18n="settings.modeText"></p>
+        <fieldset id="region-box" hidden>
+            <legend data-i18n="settings.regionLegend">Rectangle</legend>
+            <p><span id="region-status" class="muted"></span></p>
+            <button type="button" id="region-open" data-i18n="settings.regionDraw">Draw the rectangle</button>
+            <button type="button" id="region-clear" data-i18n="settings.regionClear">Remove rectangle</button>
+        </fieldset>
+        <label><span data-i18n="settings.hotkey">Screenshot key</span>
+            <select id="set-hotkey"><option value="">-</option><option value="F8">F8</option><option value="F9">F9</option><option value="F10">F10</option></select></label>
+        <fieldset>
+            <legend data-i18n="settings.masks">Areas to black out</legend>
+            <p class="muted" data-i18n="settings.masksText"></p>
+            <p><span id="mask-count" class="muted"></span></p>
+            <button type="button" id="mask-open" data-i18n="settings.masksCapture">Take a preview of the shared screen</button>
+            <button type="button" id="mask-clear" data-i18n="settings.masksClear">Remove all areas</button>
+        </fieldset>
+    </div>
+    <div class="dialog-buttons"><button id="settings-close" class="primary" data-i18n="settings.close">Close</button></div>
+</dialog>
+
+<dialog id="mask-dialog" class="dialog wide">
+    <h2 id="mask-title" data-i18n="mask.title">Draw areas to black out</h2>
+    <p id="mask-hint" class="muted" data-i18n="mask.hint"></p>
+    <canvas id="mask-canvas" width="800" height="450"></canvas>
+    <div class="dialog-buttons">
+        <button id="mask-undo" data-i18n="mask.undo">Remove last area</button>
+        <button id="mask-cancel" data-i18n="mask.cancel">Cancel</button>
+        <button id="mask-save" class="primary" data-i18n="mask.save">Save areas</button>
+    </div>
+</dialog>
+
+<dialog id="privacy-dialog" class="dialog">
+    <h2 data-i18n="privacy.title">Privacy</h2>
+    <p data-i18n="privacy.p1"></p>
+    <p data-i18n="privacy.p2"></p>
+    <p data-i18n="privacy.p3"></p>
+    <p data-i18n="privacy.p4"></p>
+    <p data-i18n="privacy.p5"></p>
+    <div class="dialog-buttons"><button id="privacy-close" class="primary" data-i18n="settings.close">Close</button></div>
+</dialog>
+
+<dialog id="export-dialog" class="dialog">
+    <h2 data-i18n="export.title">Export several days</h2>
+    <p class="muted" data-i18n="export.text"></p>
+    <ul id="export-days" class="export-days"></ul>
+    <p id="export-summary"></p>
+    <div class="dialog-buttons">
+        <button id="export-cancel" data-i18n="export.cancel">Cancel</button>
+        <button id="export-go" class="primary" data-i18n="export.download">Download ZIP</button>
+    </div>
+</dialog>
+
+<dialog id="viewer" class="viewer">
+    <div class="viewer-top">
+        <span id="viewer-counter"></span>
+        <span id="viewer-caption"></span>
+        <div class="spacer"></div>
+        <button id="viewer-zoom" data-i18n="viewer.zoom">Zoom</button>
+        <button id="viewer-close" data-i18n="viewer.close">Close</button>
+    </div>
+    <div class="viewer-stage" id="viewer-stage"><img id="viewer-img" alt=""></div>
+    <div class="viewer-bottom">
+        <button id="viewer-prev" data-i18n="viewer.prev">Previous</button>
+        <button id="viewer-next" data-i18n="viewer.next">Next</button>
+    </div>
+</dialog>
+
+<div class="toast" id="toast" hidden><span id="toast-text"></span> <button id="toast-action" hidden></button></div>
+
+<noscript>CAPture needs JavaScript. / CAPture heeft JavaScript nodig.</noscript>
+<script src="js/boot.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
