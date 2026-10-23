@@ -3,18 +3,18 @@ export const SPEECH_LANGS = ['nl-NL', 'en-US'];
 export const UI_LANGS = ['en', 'nl'];
 export const IMAGE_FORMATS = ['jpeg', 'webp', 'png'];
 export const CAPTURE_MODES = ['screen', 'window', 'tab', 'region', 'ask'];
-export const HOTKEYS = ['', 'F8', 'F9', 'F10'];
 export const MAX_MASKS = 20;
+export const MAX_SCREENS = 8;
 
 export const DEFAULTS = Object.freeze({
     speechLang: 'nl-NL',
     uiLang: 'en',
     imageFormat: 'jpeg',
     imageQuality: 0.85,
-    hotkey: 'F10',
     captureMode: 'screen',
     region: null,
     masks: [],
+    screenMasks: [],
     lastScreen: ''
 });
 
@@ -32,6 +32,58 @@ function cleanMask(m) {
     return { x: round(x), y: round(y), w: round(Math.min(w, 1 - x)), h: round(Math.min(h, 1 - y)) };
 }
 
+function cleanMasks(list) {
+    return (Array.isArray(list) ? list : []).map(cleanMask).filter(Boolean).slice(0, MAX_MASKS);
+}
+
+function cleanScreen(s) {
+    if (!s || typeof s !== 'object' || typeof s.key !== 'string' || !s.key) return null;
+    const width = Math.round(num(s.width, 1, 20000, NaN));
+    const height = Math.round(num(s.height, 1, 20000, NaN));
+    if (Number.isNaN(width) || Number.isNaN(height)) return null;
+    return {
+        key: s.key.slice(0, 200),
+        label: typeof s.label === 'string' ? s.label.slice(0, 120) : '',
+        width, height,
+        masks: cleanMasks(s.masks)
+    };
+}
+
+function cleanScreens(list) {
+    const seen = new Set();
+    const out = [];
+    for (const s of (Array.isArray(list) ? list : []).map(cleanScreen)) {
+        if (s && !seen.has(s.key)) { seen.add(s.key); out.push(s); }
+    }
+    return out.slice(0, MAX_SCREENS);
+}
+
+// Areas are kept per screen, matched on the browser's name for the screen and its size. Windows and tabs have no stable
+// identity, so they (and any screen without a set of its own) use the general set in `masks`. Returns '' for those.
+export function screenKey(source, size) {
+    const surface = source && source.surface;
+    if ((surface && surface !== 'monitor') || !size || !size.width || !size.height) return '';
+    return `${(source && source.label) || ''}|${size.width}x${size.height}`;
+}
+
+export function masksFor(settings, key) {
+    const own = key && settings.screenMasks.find(s => s.key === key);
+    return own ? own.masks : settings.masks;
+}
+
+// Settings with `masks` stored for the screen described by `target` ({ key, label, width, height }), or as the general set
+// when the target is not a screen. A screen keeps its set even when it is empty: that means "no areas on this screen".
+export function withMasks(settings, target, masks) {
+    if (!target || !target.key) return { ...settings, masks };
+    const rest = settings.screenMasks.filter(s => s.key !== target.key);
+    const entry = { key: target.key, label: target.label || '', width: target.width, height: target.height, masks };
+    return { ...settings, screenMasks: [...rest, entry].slice(-MAX_SCREENS) };
+}
+
+export function totalMasks(settings) {
+    return settings.masks.length + settings.screenMasks.reduce((n, s) => n + s.masks.length, 0);
+}
+
 export function sanitize(input) {
     const s = input && typeof input === 'object' ? input : {};
     return {
@@ -39,10 +91,10 @@ export function sanitize(input) {
         uiLang: UI_LANGS.includes(s.uiLang) ? s.uiLang : DEFAULTS.uiLang,
         imageFormat: IMAGE_FORMATS.includes(s.imageFormat) ? s.imageFormat : DEFAULTS.imageFormat,
         imageQuality: num(s.imageQuality, 0.4, 1, DEFAULTS.imageQuality),
-        hotkey: HOTKEYS.includes(s.hotkey) ? s.hotkey : DEFAULTS.hotkey,
         captureMode: CAPTURE_MODES.includes(s.captureMode) ? s.captureMode : DEFAULTS.captureMode,
         region: cleanMask(s.region),
-        masks: (Array.isArray(s.masks) ? s.masks : []).map(cleanMask).filter(Boolean).slice(0, MAX_MASKS),
+        masks: cleanMasks(s.masks),
+        screenMasks: cleanScreens(s.screenMasks),
         lastScreen: typeof s.lastScreen === 'string' ? s.lastScreen.slice(0, 120) : ''
     };
 }

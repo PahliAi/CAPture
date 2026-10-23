@@ -12,7 +12,7 @@ export class SpeechSession {
     constructor({
         createRecognition, lang,
         onFinal = () => {}, onInterim = () => {}, onError = () => {}, onState = () => {},
-        maxFailures = 4, restartDelayMs = 250, quickEndMs = 1500, drainMs = 1500,
+        maxFailures = 4, restartDelayMs = 50, quickEndMs = 1500, drainMs = 1500,
         now = () => Date.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id)
     }) {
         Object.assign(this, { createRecognition, lang, onFinal, onInterim, onError, onState, maxFailures, restartDelayMs, quickEndMs, drainMs, now, setTimer, clearTimer });

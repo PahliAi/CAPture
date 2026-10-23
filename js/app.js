@@ -1,11 +1,12 @@
-import { DayStore, dayKey } from './store.js';
+import { DayStore, dayKey, addSegment, retext } from './store.js';
 import { loadRootHandle, saveRootHandle, pickFolder, permissionState, requestPermission } from './folder.js';
 import { buildExport, includedEvents, estimateBytes, exportName, zipBlob, countsOf, WARN_BYTES, BLOCK_BYTES } from './export.js';
 import { t, setLang, applyI18n } from './i18n.js';
-import { loadSettings, saveSettings } from './settings.js';
+import { loadSettings, saveSettings, screenKey, masksFor, withMasks, totalMasks } from './settings.js';
 import { ScreenCapture } from './capture.js';
 import { SpeechSession, createBrowserRecognition } from './speech.js';
 import { detectPii } from './pii.js';
+import { summarizeDay, formatDuration, formatShare } from './history.js';
 import { createWidget } from './widget.js';
 import { createViewer } from './viewer.js';
 import { createMaskEditor } from './maskeditor.js';
@@ -104,18 +105,66 @@ const widget = createWidget({
     drawRegion: () => startRegionDraw(),
     toggleMic: () => (state.recording ? finishRecording() : startRecording()),
     setLang: lang => changeSetting({ speechLang: lang }),
-    addFiles: files => addFiles(files),
-    onKey: ev => onHotkey(ev)
+    addFiles: files => addFiles(files)
 });
 
 const viewer = createViewer({ getUrl: e => thumbUrl(e) });
 
+// The screen the open mask editor draws for (see screenKey in settings.js); empty key means the general set.
+let maskTarget = null;
+// True while the user is adding black-out areas: after each save the screen picker opens again until it is cancelled.
+let maskFlow = false;
+// Drawing areas uses its own short share, so the screen that screenshots are taken from is left alone.
+const previewCapture = new ScreenCapture();
+
 const maskEditor = createMaskEditor({
     onSave: (kind, rects) => {
-        settings = saveSettings(kind === 'region' ? { ...settings, region: rects[0] || null } : { ...settings, masks: rects });
+        settings = saveSettings(kind === 'region' ? { ...settings, region: rects[0] || null } : withMasks(settings, maskTarget, rects));
         renderSettings();
+    },
+    onClosed: (kind, saved) => {
+        if (kind !== 'mask' || !maskFlow) return;
+        if (saved) addMaskAreas(); else endMaskFlow();
     }
 });
+
+// Describes a shared screen, for choosing which set of areas applies.
+function sharedScreen(from = capture) {
+    const source = from.source;
+    const size = from.size;
+    return { source, size, key: screenKey(source, size), label: source ? source.label : '', width: size.width, height: size.height };
+}
+
+function endMaskFlow() {
+    maskFlow = false;
+    renderSettings();
+    if (!$('settings-dialog').open) $('settings-dialog').showModal();
+}
+
+// Add black-out areas: pick a screen or window, draw on a preview of it and save. The picker then opens again for the
+// next one; cancelling the picker or the drawing goes back to Settings. A screen that already has areas shows them again.
+async function addMaskAreas() {
+    maskFlow = true;
+    if ($('settings-dialog').open) $('settings-dialog').close();
+    let bitmap;
+    let target;
+    try {
+        await previewCapture.start('ask');
+        target = sharedScreen(previewCapture);
+        bitmap = await createImageBitmap(await previewCapture.grab({ format: 'jpeg', quality: 0.7, masks: [] }));
+    } catch (err) {
+        if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') toast(t('toast.captureFailed', { error: err.message }));
+        endMaskFlow();
+        return;
+    } finally {
+        previewCapture.stop();
+    }
+    maskTarget = target;
+    const name = target.key
+        ? t('mask.targetScreen', { screen: target.label || t('settings.masksUnnamed'), size: `${target.width}x${target.height}` })
+        : t('mask.targetOthers');
+    maskEditor.open(bitmap, masksFor(settings, target.key), 'mask', name);
+}
 
 // ---- Screen capture ------------------------------------------------------
 const capture = new ScreenCapture({
@@ -187,11 +236,13 @@ async function takeScreenshot() {
     if (settings.captureMode === 'ask' && capture.active) { capture.stop(); updateShareUi(); }
     if (!await ensureSharing()) { widget.mark('cam', 'fail'); return; }
     let blob;
+    const { source, key } = sharedScreen();
+    const masks = masksFor(settings, key);
     try {
         blob = await capture.grab({
             format: settings.imageFormat,
             quality: settings.imageQuality,
-            masks: settings.masks,
+            masks,
             region: settings.captureMode === 'region' ? settings.region : null
         });
     } catch (err) {
@@ -202,19 +253,13 @@ async function takeScreenshot() {
         if (settings.captureMode === 'ask') { capture.stop(); updateShareUi(); }
     }
     const d = new Date();
-    const added = await addToToday({ type: 'screenshot', start: d, end: d }, blob);
+    const added = await addToToday({ type: 'screenshot', start: d, end: d, source }, blob);
     if (added) {
         confirmed($('shot'), 'cam');
-        toast(t('toast.screenshotSaved', { time: hm(d) }), undoAction(() => removeItems(added.day, [added.event.id])));
+        const message = masks.length ? t('toast.screenshotSavedMasked', { time: hm(d), n: masks.length }) : t('toast.screenshotSaved', { time: hm(d) });
+        toast(message, undoAction(() => removeItems(added.day, [added.event.id])));
     }
 }
-
-function onHotkey(ev) {
-    if (!settings.hotkey || ev.key !== settings.hotkey || ev.repeat) return;
-    ev.preventDefault();
-    takeScreenshot();
-}
-window.addEventListener('keydown', onHotkey);
 
 // ---- Adding items --------------------------------------------------------
 async function addToToday(input, blob) {
@@ -268,17 +313,24 @@ async function startRecording() {
     const added = await addToToday({ type: 'speech', start, end: start, text: '' });
     if (!added) return;
     const { day, event } = added;
+    let phraseStart = null;
 
     const session = new SpeechSession({
         createRecognition,
         lang: settings.speechLang,
         onFinal: text => {
-            event.text = event.text ? `${event.text} ${text}` : text;
-            event.end = new Date();
+            const last = event.segments[event.segments.length - 1];
+            const end = new Date();
+            addSegment(event, text, phraseStart || (last ? last.end : event.start), end);
+            phraseStart = null;
             save(day);
-            if (day === state.day) render();
+            if (day === state.day && !refreshFocusedLive(event)) render();
         },
-        onInterim: text => { state.interim = text; widget.render(); },
+        onInterim: text => {
+            if (text && !phraseStart) phraseStart = new Date();
+            state.interim = text;
+            widget.render();
+        },
         onError: kind => {
             const key = { denied: 'toast.micDenied', missing: 'toast.micMissing', network: 'toast.speechNetwork', failing: 'toast.speechStopped' }[kind];
             toast(t(key || 'toast.speechStopped'));
@@ -331,7 +383,7 @@ function matchesSearch(e) {
 }
 
 function visibleEvents() {
-    return state.day.events.filter(e => matchesFilter(e) && matchesSearch(e)).sort((a, b) => a.start - b.start);
+    return state.day.events.filter(e => matchesFilter(e) && matchesSearch(e)).sort((a, b) => b.start - a.start);
 }
 
 async function thumbUrl(e) {
@@ -359,17 +411,20 @@ async function changeFlags(events, patch, messageKey) {
     }));
 }
 
-async function splitItem(e, textarea) {
-    const index = textarea.selectionStart;
-    if (!index || index >= textarea.value.length) { toast(t('toast.splitNothing')); return; }
-    await flush();
-    try {
-        await state.day.split(e.id, index);
-        render();
-        toast(t('toast.split'));
-    } catch (err) {
-        toast(t('toast.saveFailed', { error: err.message }));
-    }
+const timeLabel = e => (e.end - e.start > 1000 ? `${hm(e.start)} - ${hm(e.end)}` : hm(e.start));
+
+// While the reader is typing in the row being dictated into, new words are added in place so the cursor,
+// selection and scroll position stay where they are. Returns false when a normal render is needed.
+function refreshFocusedLive(e) {
+    const ta = $('timeline').querySelector('li.event.live textarea');
+    if (!ta || document.activeElement !== ta || !state.recording || state.recording.event !== e) return false;
+    const { selectionStart, selectionEnd, selectionDirection, scrollTop } = ta;
+    ta.value = e.text;
+    ta.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
+    ta.scrollTop = scrollTop;
+    ta.closest('li').querySelector('.time').textContent = timeLabel(e);
+    renderBar();
+    return true;
 }
 
 function renderEvent(e, screenshots) {
@@ -388,20 +443,21 @@ function renderEvent(e, screenshots) {
         renderBulk();
     });
 
-    const time = el('div', 'time', e.end - e.start > 1000 ? `${hm(e.start)} - ${hm(e.end)}` : hm(e.start));
+    const time = el('div', 'time', timeLabel(e));
     const badge = el('div', `badge ${e.type}`, t(`type.${e.type}`));
 
     const body = el('div', 'body');
     if (e.type === 'speech' || e.type === 'note') {
         const ta = el('textarea');
         ta.value = e.text;
+        // The row being dictated into always shows its newest words at the bottom.
+        if (live) ta.dataset.live = '1';
         ta.disabled = e.deleted || readOnly;
         ta.setAttribute('aria-label', t('row.textLabel', { type: t(`type.${e.type}`) }));
-        ta.addEventListener('input', () => { e.text = ta.value; saveSoon(); });
+        ta.addEventListener('input', () => { retext(e, ta.value); saveSoon(); });
         body.appendChild(ta);
         const kinds = detectPii(e.text);
         if (kinds.length) body.appendChild(el('div', 'pii', t('row.pii', { kinds: kinds.map(k => t(`pii.${k}`)).join(', ') })));
-        li.split = () => splitItem(e, ta);
     } else if (e.type === 'screenshot') {
         const thumb = el('button', 'thumb');
         thumb.type = 'button';
@@ -413,6 +469,7 @@ function renderEvent(e, screenshots) {
         thumb.addEventListener('click', () => viewer.open(screenshots, screenshots.indexOf(e)));
         body.appendChild(thumb);
         body.appendChild(el('div', 'meta', `${e.name} - ${formatSize(e.size)}`));
+        if (e.source && e.source.label) body.appendChild(el('div', 'meta', e.source.label));
     } else {
         body.appendChild(el('div', '', e.name));
         body.appendChild(el('div', 'meta', `${e.mime} - ${formatSize(e.size)}`));
@@ -428,11 +485,6 @@ function renderEvent(e, screenshots) {
     del.disabled = readOnly;
     del.addEventListener('click', () => changeFlags([e], x => ({ deleted: !x.deleted }), e.deleted ? 'toast.restored' : 'toast.deleted'));
     actions.append(priv, del);
-    if ((e.type === 'speech' || e.type === 'note') && !e.deleted && !readOnly) {
-        const split = el('button', '', t('row.split'));
-        split.addEventListener('click', () => li.split());
-        actions.appendChild(split);
-    }
 
     li.append(check, time, badge, body, actions);
     return li;
@@ -442,6 +494,8 @@ function renderTimeline() {
     const shown = visibleEvents();
     const screenshots = shown.filter(e => e.type === 'screenshot' && e.file);
     $('timeline').replaceChildren(...shown.map(e => renderEvent(e, screenshots)));
+    const liveText = $('timeline').querySelector('textarea[data-live]');
+    if (liveText) liveText.scrollTop = liveText.scrollHeight;
 
     const ids = new Set(state.day.events.map(e => e.id));
     for (const id of [...state.selected]) if (!ids.has(id)) state.selected.delete(id);
@@ -563,6 +617,47 @@ async function openExportDialog() {
     $('export-dialog').showModal();
 }
 
+// ---- History -------------------------------------------------------------
+async function openHistory() {
+    await flush();
+    const keys = await state.store.listDays();
+    const rows = [];
+    for (const key of keys) {
+        try {
+            const day = key === state.day.key ? state.day : await state.store.openDay(key, false);
+            const sum = summarizeDay(day);
+            if (sum.items) rows.push(sum);
+        } catch {
+            // an unreadable day is skipped
+        }
+    }
+    rows.sort((a, b) => (a.key < b.key ? 1 : -1));
+    $('history-rows').replaceChildren(...rows.map(sum => {
+        const tr = el('tr');
+        const link = el('button', '', sum.key);
+        link.type = 'button';
+        link.setAttribute('aria-label', t('history.open', { day: sum.key }));
+        const first = el('td');
+        first.appendChild(link);
+        tr.appendChild(first);
+        for (const text of [sum.speech, sum.screenshot, sum.file, sum.note, formatDuration(sum.spanMs), formatDuration(sum.audioMs), formatShare(sum.share)]) {
+            tr.appendChild(el('td', 'num', String(text)));
+        }
+        tr.addEventListener('click', async () => {
+            $('history-dialog').close();
+            try {
+                await openDay(sum.key);
+            } catch (err) {
+                toast(t('toast.dayOpenFailed', { error: err.message }));
+            }
+        });
+        return tr;
+    }));
+    $('history-table').hidden = rows.length === 0;
+    $('history-empty').hidden = rows.length > 0;
+    $('history-dialog').showModal();
+}
+
 // ---- Days ----------------------------------------------------------------
 async function refreshDays() {
     const keys = new Set(await state.store.listDays());
@@ -616,12 +711,28 @@ function renderSettings() {
     $('set-quality').value = String(settings.imageQuality);
     $('set-quality').disabled = settings.imageFormat === 'png';
     $('set-quality-out').textContent = settings.imageFormat === 'png' ? '' : `${Math.round(settings.imageQuality * 100)}%`;
-    $('set-hotkey').value = settings.hotkey;
     $('set-capture-mode').value = settings.captureMode;
     $('region-box').hidden = settings.captureMode !== 'region';
     $('region-status').textContent = settings.region ? t('settings.regionSet') : t('settings.regionNone');
-    $('mask-count').textContent = t('settings.masksCount', { n: settings.masks.length });
+    renderMasks();
     widget.render();
+}
+
+// The areas to black out: the total, the screen that is shared now, and one row per screen with its own areas.
+function renderMasks() {
+    $('mask-count').textContent = t('settings.masksCount', { n: totalMasks(settings) });
+    const rows = settings.screenMasks.map(s => ({ key: s.key, text: t('settings.masksScreen', { screen: s.label || t('settings.masksUnnamed'), size: `${s.width}x${s.height}`, n: s.masks.length }) }));
+    if (settings.masks.length) rows.push({ key: '', text: t('settings.masksOthers', { n: settings.masks.length }) });
+    $('mask-screens').replaceChildren(...rows.map(row => {
+        const li = el('li', '', row.text);
+        const remove = el('button', '', t('settings.masksRemove'));
+        remove.type = 'button';
+        remove.addEventListener('click', () => changeSetting(row.key
+            ? { screenMasks: settings.screenMasks.filter(s => s.key !== row.key) }
+            : { masks: [] }));
+        li.append(' ', remove);
+        return li;
+    }));
 }
 
 // Changes how screenshots are taken. A new mode ends the current share so the next screenshot uses the right picker.
@@ -659,28 +770,19 @@ function changeSetting(patch) {
 
 $('open-settings').addEventListener('click', () => { renderSettings(); $('settings-dialog').showModal(); });
 $('settings-close').addEventListener('click', () => $('settings-dialog').close());
+$('open-history').addEventListener('click', () => openHistory().catch(err => toast(t('toast.dayOpenFailed', { error: err.message }))));
+$('history-close').addEventListener('click', () => $('history-dialog').close());
 $('open-privacy').addEventListener('click', () => $('privacy-dialog').showModal());
 $('privacy-close').addEventListener('click', () => $('privacy-dialog').close());
 $('set-speech-lang').addEventListener('change', e => changeSetting({ speechLang: e.target.value }));
 $('set-ui-lang').addEventListener('change', e => changeSetting({ uiLang: e.target.value }));
 $('set-format').addEventListener('change', e => changeSetting({ imageFormat: e.target.value }));
 $('set-quality').addEventListener('input', e => changeSetting({ imageQuality: Number(e.target.value) }));
-$('set-hotkey').addEventListener('change', e => changeSetting({ hotkey: e.target.value }));
 $('set-capture-mode').addEventListener('change', e => setCaptureMode(e.target.value));
 $('region-clear').addEventListener('click', () => changeSetting({ region: null }));
 $('region-open').addEventListener('click', () => startRegionDraw());
-$('mask-clear').addEventListener('click', () => changeSetting({ masks: [] }));
-$('mask-open').addEventListener('click', async () => {
-    if (!await ensureSharing()) { toast(t('settings.masksNeedShare')); return; }
-    try {
-        const blob = await capture.grab({ format: 'jpeg', quality: 0.7, masks: [] });
-        const bitmap = await createImageBitmap(blob);
-        $('settings-dialog').close();
-        maskEditor.open(bitmap, settings.masks, 'mask');
-    } catch (err) {
-        toast(t('toast.captureFailed', { error: err.message }));
-    }
-});
+$('mask-clear').addEventListener('click', () => changeSetting({ masks: [], screenMasks: [] }));
+$('mask-open').addEventListener('click', () => addMaskAreas());
 
 // ---- Start-up ------------------------------------------------------------
 function showGate(title, text, primary, onPrimary, secondary, onSecondary) {
@@ -771,7 +873,7 @@ $('zip-main').addEventListener('click', () => exportDays([state.day]));
 $('export-more').addEventListener('click', () => openExportDialog().catch(err => toast(t('export.failed', { error: err.message }))));
 $('export-cancel').addEventListener('click', () => $('export-dialog').close());
 $('open-widget').addEventListener('click', () => widget.open().catch(err => toast(t('toast.widgetFailed', { error: err.message }))));
-$('change-folder').addEventListener('click', async () => { await flush(); await choose(); });
+$('change-folder').addEventListener('click', async () => { $('settings-dialog').close(); await flush(); await choose(); });
 $('day-select').addEventListener('change', e => openDay(e.target.value).catch(err => toast(t('toast.dayOpenFailed', { error: err.message }))));
 
 $('purge').addEventListener('click', async () => {

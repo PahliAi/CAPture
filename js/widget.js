@@ -139,8 +139,7 @@ export function createWidget(api) {
         };
 
         d.addEventListener('keydown', ev => {
-            if (ev.key === 'Escape' && menu) { closeMenu(); return; }
-            api.onKey(ev);
+            if (ev.key === 'Escape' && menu) closeMenu();
         });
         d.addEventListener('click', ev => { if (menu && !menu.contains(ev.target)) closeMenu(); });
         d.body.addEventListener('dragover', ev => { ev.preventDefault(); d.body.classList.add('over'); });

@@ -53,6 +53,14 @@ export class ScreenCapture {
         return track ? track.label : '';
     }
 
+    // What is being shared, as far as the browser tells: the track label and the surface kind (monitor, window, browser).
+    get source() {
+        const track = this.stream && this.stream.getVideoTracks()[0];
+        if (!track) return null;
+        const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
+        return { label: track.label || '', surface: settings.displaySurface || '' };
+    }
+
     get size() {
         return this.video ? { width: this.video.videoWidth, height: this.video.videoHeight } : { width: 0, height: 0 };
     }

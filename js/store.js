@@ -37,6 +37,41 @@ function timeStamp(d) {
     return `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+// ---- speech timing -------------------------------------------------------
+// A recording's text is built from phrases. Each segment says that the text from character `from` onwards
+// was spoken between `start` and `end`, so the time of any point in the text can be told afterwards.
+
+export function addSegment(e, text, start, end) {
+    const from = e.text ? e.text.length + 1 : 0;
+    e.text = e.text ? `${e.text} ${text}` : text;
+    e.segments.push({ start, end, from });
+    e.end = end;
+}
+
+// Replace the text of an item and keep the segment offsets pointing at the same words.
+export function retext(e, value) {
+    const old = e.text;
+    let p = 0;
+    while (p < old.length && p < value.length && old[p] === value[p]) p++;
+    let s = 0;
+    while (s < old.length - p && s < value.length - p && old[old.length - 1 - s] === value[value.length - 1 - s]) s++;
+    const delta = value.length - old.length;
+    const merged = [];
+    for (const seg of e.segments) {
+        let from = seg.from;
+        if (from > p) from = from >= old.length - s ? from + delta : p;
+        if (from >= value.length) continue;
+        const last = merged[merged.length - 1];
+        if (last && last.from === from) {
+            if (seg.end > last.end) last.end = seg.end;
+        } else {
+            merged.push({ start: seg.start, end: seg.end, from });
+        }
+    }
+    e.segments = merged;
+    e.text = value;
+}
+
 // ---- records -------------------------------------------------------------
 
 function toRecord(e) {
@@ -46,9 +81,32 @@ function toRecord(e) {
     if (e.name) r.name = e.name;
     if (e.size) r.size = e.size;
     if (e.mime) r.mime = e.mime;
+    if (e.source) r.source = e.source;
+    if (e.segments.length) r.segments = e.segments.map(x => ({ start: x.start.toISOString(), end: x.end.toISOString(), from: x.from }));
     if (e.private) r.private = true;
     if (e.deleted) r.deleted = true;
     return r;
+}
+
+function segmentsOf(r) {
+    if (!Array.isArray(r.segments)) return [];
+    const out = [];
+    for (const x of r.segments) {
+        const start = new Date(x && x.start);
+        const end = new Date(x && x.end);
+        if (x && Number.isInteger(x.from) && x.from >= 0 && !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+            out.push({ start, end, from: x.from });
+        }
+    }
+    return out;
+}
+
+// What a screenshot was taken of, as far as the browser tells: { label, surface }.
+function sourceOf(v) {
+    if (!v || typeof v !== 'object') return null;
+    const label = typeof v.label === 'string' ? v.label.slice(0, 300) : '';
+    const surface = typeof v.surface === 'string' ? v.surface.slice(0, 20) : '';
+    return label || surface ? { label, surface } : null;
 }
 
 function fromRecord(r) {
@@ -67,6 +125,8 @@ function fromRecord(r) {
         name: typeof r.name === 'string' ? r.name : '',
         size: Number.isFinite(r.size) ? r.size : 0,
         mime: typeof r.mime === 'string' ? r.mime : '',
+        source: sourceOf(r.source),
+        segments: segmentsOf(r),
         private: r.private === true,
         deleted: r.deleted === true
     };
@@ -166,8 +226,9 @@ export class Day {
             const end = input.end || start;
             const e = {
                 id, type: input.type, start, end, text: input.text || '',
-                file: '', name: '', size: 0, mime: '', private: false, deleted: false
+                file: '', name: '', size: 0, mime: '', source: null, segments: [], private: false, deleted: false
             };
+            if (input.type === 'screenshot') e.source = sourceOf(input.source);
             if (blob) {
                 if (input.type === 'screenshot') {
                     e.mime = blob.type || 'image/png';
@@ -229,30 +290,6 @@ export class Day {
             await this.#persist();
             for (const e of gone) if (e.file) await removeQuietly(this.dir, e.file);
             return gone.length;
-        });
-    }
-
-    // Split a speech or note item in two at a text position. The time is divided in proportion to the text.
-    async split(id, index) {
-        this.#assertWritable();
-        return this.#enqueue(async () => {
-            const e = this.events.find(x => x.id === id);
-            if (!e || (e.type !== 'speech' && e.type !== 'note')) throw new Error('This item cannot be split');
-            const first = e.text.slice(0, index).trimEnd();
-            const second = e.text.slice(index).trimStart();
-            if (!first || !second) throw new Error('Nothing to split here');
-            const span = e.end - e.start;
-            const mid = span > 0 ? new Date(e.start.getTime() + Math.round(span * (index / e.text.length))) : e.start;
-            const created = {
-                id: this.events.reduce((m, x) => Math.max(m, x.id), 0) + 1,
-                type: e.type, start: mid, end: e.end, text: second,
-                file: '', name: '', size: 0, mime: '', private: e.private, deleted: e.deleted
-            };
-            e.text = first;
-            e.end = mid;
-            this.events.push(created);
-            await this.#persist();
-            return created;
         });
     }
 

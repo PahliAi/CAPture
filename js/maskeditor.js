@@ -2,7 +2,7 @@
 // kind 'mask': any number of areas that are blacked out. kind 'region': one rectangle that screenshots are cropped to.
 import { t } from './i18n.js';
 
-export function createMaskEditor({ onSave }) {
+export function createMaskEditor({ onSave, onClosed = () => {} }) {
     const dlg = document.getElementById('mask-dialog');
     const canvas = document.getElementById('mask-canvas');
     const ctx = canvas.getContext('2d');
@@ -11,6 +11,7 @@ export function createMaskEditor({ onSave }) {
     let work = [];
     let drag = null;
     let origin = null;
+    let saved = false;
 
     function redraw() {
         if (!bitmap) return;
@@ -74,15 +75,21 @@ export function createMaskEditor({ onSave }) {
 
     document.getElementById('mask-undo').addEventListener('click', () => { work.pop(); redraw(); });
     document.getElementById('mask-cancel').addEventListener('click', () => dlg.close());
-    document.getElementById('mask-save').addEventListener('click', () => { onSave(kind, work.map(m => ({ ...m }))); dlg.close(); });
+    document.getElementById('mask-save').addEventListener('click', () => { onSave(kind, work.map(m => ({ ...m }))); saved = true; dlg.close(); });
+    // Closing by any route (Save, Cancel, Escape) ends here; the caller learns whether the areas were saved.
+    dlg.addEventListener('close', () => { const wasSaved = saved; saved = false; onClosed(kind, wasSaved); });
 
     return {
-        open(previewBitmap, rects, openKind = 'mask') {
+        // `target` names what the areas are drawn for (a screen, or windows and tabs); it is shown in the title.
+        open(previewBitmap, rects, openKind = 'mask', target = '') {
             bitmap = previewBitmap;
             kind = openKind;
+            saved = false;
             work = rects.map(m => ({ ...m }));
             drag = null;
-            document.getElementById('mask-title').textContent = t(kind === 'region' ? 'mask.regionTitle' : 'mask.title');
+            document.getElementById('mask-title').textContent = kind === 'region'
+                ? t('mask.regionTitle')
+                : (target ? t('mask.titleFor', { target }) : t('mask.title'));
             document.getElementById('mask-hint').textContent = t(kind === 'region' ? 'mask.regionHint' : 'mask.hint');
             canvas.width = 800;
             canvas.height = Math.max(100, Math.round(800 * bitmap.height / bitmap.width));

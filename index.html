@@ -9,14 +9,13 @@
 </head>
 <body>
 <header>
-    <h1><b>CAP</b>ture</h1>
+    <h1><img src="logo.png" alt="CAPture" width="159" height="36"></h1>
     <div class="spacer"></div>
     <div class="actions-top">
         <button id="shot" class="primary" hidden data-i18n="header.screenshot">Take screenshot</button>
-        <span class="folder"><span data-i18n="header.folder">Folder:</span> <b id="folder-label">-</b></span>
-        <button id="change-folder" data-i18n="header.changeFolder">Change folder</button>
         <button id="open-widget" class="primary" data-i18n="header.widget">Open widget</button>
         <button id="open-settings" data-i18n="header.settings">Settings</button>
+        <button id="open-history" data-i18n="header.history">History</button>
         <button id="open-privacy" data-i18n="header.privacy">Privacy</button>
     </div>
 </header>
@@ -99,6 +98,11 @@
 <dialog id="settings-dialog" class="dialog">
     <h2 data-i18n="settings.title">Settings</h2>
     <div class="form">
+        <fieldset>
+            <legend data-i18n="settings.folderLegend">Storage folder</legend>
+            <p><span data-i18n="settings.folderLabel">Folder:</span> <b id="folder-label">-</b></p>
+            <button type="button" id="change-folder" data-i18n="settings.folderChange">Change folder</button>
+        </fieldset>
         <label><span data-i18n="settings.speechLang">Speech language</span>
             <select id="set-speech-lang"><option value="nl-NL" data-i18n="settings.lang.nl">Dutch</option><option value="en-US" data-i18n="settings.lang.en">English</option></select></label>
         <label><span data-i18n="settings.uiLang">Interface language</span>
@@ -116,13 +120,12 @@
             <button type="button" id="region-open" data-i18n="settings.regionDraw">Draw the rectangle</button>
             <button type="button" id="region-clear" data-i18n="settings.regionClear">Remove rectangle</button>
         </fieldset>
-        <label><span data-i18n="settings.hotkey">Screenshot key</span>
-            <select id="set-hotkey"><option value="">-</option><option value="F8">F8</option><option value="F9">F9</option><option value="F10">F10</option></select></label>
         <fieldset>
             <legend data-i18n="settings.masks">Areas to black out</legend>
             <p class="muted" data-i18n="settings.masksText"></p>
             <p><span id="mask-count" class="muted"></span></p>
-            <button type="button" id="mask-open" data-i18n="settings.masksCapture">Take a preview of the shared screen</button>
+            <ul id="mask-screens" class="mask-screens"></ul>
+            <button type="button" id="mask-open" data-i18n="settings.masksAdd">Add black-out area(s)</button>
             <button type="button" id="mask-clear" data-i18n="settings.masksClear">Remove all areas</button>
         </fieldset>
     </div>
@@ -138,6 +141,30 @@
         <button id="mask-cancel" data-i18n="mask.cancel">Cancel</button>
         <button id="mask-save" class="primary" data-i18n="mask.save">Save areas</button>
     </div>
+</dialog>
+
+<dialog id="history-dialog" class="dialog wide">
+    <h2 data-i18n="history.title">History</h2>
+    <p class="muted" data-i18n="history.text"></p>
+    <div class="history-scroll">
+        <table class="history" id="history-table">
+            <thead>
+                <tr>
+                    <th scope="col" data-i18n="history.day">Day</th>
+                    <th scope="col" class="num" data-i18n="history.speech">Speech</th>
+                    <th scope="col" class="num" data-i18n="history.screenshots">Screenshots</th>
+                    <th scope="col" class="num" data-i18n="history.files">Files</th>
+                    <th scope="col" class="num" data-i18n="history.notes">Notes</th>
+                    <th scope="col" class="num" data-i18n="history.span">First to last</th>
+                    <th scope="col" class="num" data-i18n="history.audio">Audio capture</th>
+                    <th scope="col" class="num" data-i18n="history.share">Audio share</th>
+                </tr>
+            </thead>
+            <tbody id="history-rows"></tbody>
+        </table>
+    </div>
+    <p id="history-empty" class="muted" hidden data-i18n="history.empty"></p>
+    <div class="dialog-buttons"><button id="history-close" class="primary" data-i18n="settings.close">Close</button></div>
 </dialog>
 
 <dialog id="privacy-dialog" class="dialog">

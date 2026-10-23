@@ -9,7 +9,7 @@ body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; color: var(--i
 /* masthead */
 header { display: flex; align-items: flex-end; gap: 28px; padding: 18px 32px 0; border-bottom: 2px solid var(--ink); background: var(--paper); position: sticky; top: 0; z-index: 5; }
 header h1 { font-family: var(--serif); font-size: 30px; margin: 0; letter-spacing: -0.5px; line-height: 1; padding-bottom: 10px; }
-header h1 b { color: var(--pine); }
+header h1 img { display: block; height: 36px; width: auto; }
 .spacer { flex: 1; }
 header .actions-top { display: flex; gap: 10px; padding-bottom: 10px; }
 
@@ -117,11 +117,21 @@ button.thumb img { border: 0; }
 .dialog::backdrop { background: rgba(29, 27, 22, 0.55); }
 .dialog h2 { font-family: var(--serif); margin: 0 0 12px; font-size: 22px; }
 .dialog p { line-height: 1.5; }
+.history-scroll { max-height: 55vh; overflow: auto; border-top: 1px solid var(--ink); }
+table.history { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.history th, table.history td { padding: 8px 10px; border-bottom: 1px solid var(--rule); text-align: left; white-space: nowrap; }
+table.history th { position: sticky; top: 0; background: var(--paper); font-weight: 600; }
+table.history .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.history tbody tr { cursor: pointer; }
+table.history tbody tr:hover, table.history tbody tr:focus-within { background: var(--card); }
+table.history td button { font: inherit; font-weight: 600; background: none; border: 0; padding: 0; color: var(--ink); text-decoration: underline; cursor: pointer; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .form { display: flex; flex-direction: column; gap: 14px; }
 .form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
 .form select { font-size: 15px; font-family: inherit; font-weight: 400; }
 fieldset { border: 1px solid var(--rule); padding: 10px 14px; }
+.mask-screens { list-style: none; padding: 0; margin: 8px 0; }
+.mask-screens li { margin: 4px 0; }
 legend { font-size: 14px; padding: 0 6px; }
 #mask-canvas { width: 100%; border: 1px solid var(--ink); cursor: crosshair; touch-action: none; }
 .export-days { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; border-top: 1px solid var(--rule); }
