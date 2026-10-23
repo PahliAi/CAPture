@@ -13,6 +13,7 @@
     <div class="spacer"></div>
     <div class="actions-top">
         <button id="shot" class="primary" hidden data-i18n="header.screenshot">Take screenshot</button>
+        <button id="add-files" hidden data-i18n="widget.fileTitle">Add files</button>
         <button id="open-widget" class="primary" data-i18n="header.widget">Open widget</button>
         <button id="open-settings" data-i18n="header.settings">Settings</button>
         <button id="open-history" data-i18n="header.history">History</button>
@@ -31,7 +32,7 @@
 
 <main id="app" hidden>
     <div class="toolbar">
-        <select id="day-select" data-i18n-aria="toolbar.day" aria-label="Day"></select>
+        <button id="day-button" class="day-button" type="button" aria-haspopup="dialog"></button>
         <button class="chip" data-filter="all" aria-pressed="true" data-i18n="filter.all">All</button>
         <button class="chip" data-filter="speech" aria-pressed="false" data-i18n="filter.speech">Speech</button>
         <button class="chip" data-filter="screenshot" aria-pressed="false" data-i18n="filter.screenshot">Screenshots</button>
@@ -62,15 +63,12 @@
         </div>
     </details>
 
-    <form id="note-form" class="note-form">
+    <!-- Shown only when the browser has no floating widget, which otherwise holds the note field and the file button. -->
+    <form id="note-form" class="note-form" hidden>
         <input id="note-input" type="text" data-i18n-placeholder="note.placeholder" data-i18n-aria="note.add" placeholder="Add a note to today">
         <button type="submit" data-i18n="note.add">Add note</button>
     </form>
-
-    <div class="drop" id="drop">
-        <span data-i18n="drop.text">Drop files here to add them to today, or</span>
-        <label class="file-label"><span data-i18n="drop.choose">choose files</span><input id="file-input" type="file" multiple></label>
-    </div>
+    <input id="file-input" type="file" multiple hidden>
 
     <div id="bulk" class="bulk" hidden>
         <strong id="bulk-count"></strong>
@@ -91,8 +89,7 @@
         <strong id="bar-main"></strong>
         <span id="bar-detail"></span>
     </div>
-    <button id="export-more" data-i18n="bar.more">Export several days...</button>
-    <button id="zip-main" class="primary" data-i18n="bar.approve">Approve and download ZIP</button>
+    <button id="zip-main" class="primary" data-i18n="bar.download">Download ZIP</button>
 </footer>
 
 <dialog id="settings-dialog" class="dialog">
@@ -150,6 +147,7 @@
         <table class="history" id="history-table">
             <thead>
                 <tr>
+                    <th scope="col"><span class="sr-only" data-i18n="history.selectColumn">Include in ZIP</span></th>
                     <th scope="col" data-i18n="history.day">Day</th>
                     <th scope="col" class="num" data-i18n="history.speech">Speech</th>
                     <th scope="col" class="num" data-i18n="history.screenshots">Screenshots</th>
@@ -163,8 +161,11 @@
             <tbody id="history-rows"></tbody>
         </table>
     </div>
-    <p id="history-empty" class="muted" hidden data-i18n="history.empty"></p>
-    <div class="dialog-buttons"><button id="history-close" class="primary" data-i18n="settings.close">Close</button></div>
+    <p id="history-summary" class="muted"></p>
+    <div class="dialog-buttons">
+        <button id="history-close" data-i18n="settings.close">Close</button>
+        <button id="history-download" class="primary" data-i18n="bar.download">Download ZIP</button>
+    </div>
 </dialog>
 
 <dialog id="privacy-dialog" class="dialog">
@@ -175,17 +176,6 @@
     <p data-i18n="privacy.p4"></p>
     <p data-i18n="privacy.p5"></p>
     <div class="dialog-buttons"><button id="privacy-close" class="primary" data-i18n="settings.close">Close</button></div>
-</dialog>
-
-<dialog id="export-dialog" class="dialog">
-    <h2 data-i18n="export.title">Export several days</h2>
-    <p class="muted" data-i18n="export.text"></p>
-    <ul id="export-days" class="export-days"></ul>
-    <p id="export-summary"></p>
-    <div class="dialog-buttons">
-        <button id="export-cancel" data-i18n="export.cancel">Cancel</button>
-        <button id="export-go" class="primary" data-i18n="export.download">Download ZIP</button>
-    </div>
 </dialog>
 
 <dialog id="viewer" class="viewer">

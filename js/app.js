@@ -105,6 +105,7 @@ const widget = createWidget({
     drawRegion: () => startRegionDraw(),
     toggleMic: () => (state.recording ? finishRecording() : startRecording()),
     setLang: lang => changeSetting({ speechLang: lang }),
+    addNote: text => addNote(text),
     addFiles: files => addFiles(files)
 });
 
@@ -178,9 +179,16 @@ function updateShareUi() {
     widget.render();
 }
 
-// The main window only has a screenshot button when the widget cannot start the screen picker by itself.
 function revealShotButton() {
     $('shot').hidden = false;
+}
+
+// Without the floating widget the main window carries what the widget would: the screenshot button, the note
+// field and the button for adding files.
+function revealWidgetFallbacks() {
+    revealShotButton();
+    $('note-form').hidden = false;
+    $('add-files').hidden = false;
 }
 
 // A short green flash on the button the user pressed, as a quiet confirmation that it worked.
@@ -267,7 +275,7 @@ async function addToToday(input, blob) {
         const day = state.day.key === state.todayKey ? state.day : await state.store.openDay(state.todayKey);
         const event = await day.add(input, blob);
         if (day === state.day) render(); else toast(t('toast.addedToday'));
-        await refreshDays();
+        showDay();
         return { day, event };
     } catch (err) {
         toast(t('toast.saveFailed', { error: err.message }));
@@ -507,8 +515,7 @@ function renderTimeline() {
 
     $('day-warning').hidden = !state.day.readOnly;
     $('purge').hidden = !state.day.events.some(e => e.deleted);
-    const select = $('day-select');
-    if (select.value !== state.day.key) select.value = state.day.key;
+    showDay();
     $('select-all').checked = shown.length > 0 && shown.every(e => state.selected.has(e.id));
     renderBulk();
 }
@@ -575,58 +582,18 @@ async function exportDays(days) {
     }
 }
 
-async function openExportDialog() {
-    await flush();
-    const keys = await state.store.listDays();
-    const list = $('export-days');
-    const loaded = [];
-    for (const key of keys) {
-        try {
-            loaded.push(key === state.day.key ? state.day : await state.store.openDay(key, false));
-        } catch {
-            // an unreadable day is skipped
-        }
-    }
-    list.replaceChildren(...loaded.map(day => {
-        const inc = includedEvents(day);
-        const li = el('li');
-        const label = el('label');
-        const box = el('input');
-        box.type = 'checkbox';
-        box.value = day.key;
-        box.checked = day.key === state.day.key && inc.length > 0;
-        box.disabled = inc.length === 0;
-        label.append(box, document.createTextNode(` ${day.key} - ${t('export.items', { n: inc.length })} - ${formatSize(estimateBytes([day]))}`));
-        li.appendChild(label);
-        return li;
-    }));
-    const days = () => loaded.filter(d => [...list.querySelectorAll('input:checked')].some(b => b.value === d.key));
-    const refresh = () => {
-        const chosen = days();
-        const bytes = estimateBytes(chosen);
-        const summary = $('export-summary');
-        let text = chosen.length ? t('export.size', { size: formatSize(bytes) }) : t('export.nodays');
-        if (bytes > BLOCK_BYTES) text += ` ${t('export.block')}`;
-        else if (bytes > WARN_BYTES) text += ` ${t('export.warn')}`;
-        summary.textContent = text;
-        $('export-go').disabled = !chosen.length || bytes > BLOCK_BYTES;
-    };
-    list.onchange = refresh;
-    $('export-go').onclick = async () => { const chosen = days(); $('export-dialog').close(); await exportDays(chosen); };
-    refresh();
-    $('export-dialog').showModal();
-}
-
 // ---- History -------------------------------------------------------------
 async function openHistory() {
     await flush();
-    const keys = await state.store.listDays();
+    const keys = new Set(await state.store.listDays());
+    keys.add(state.todayKey);
+    const days = new Map();
     const rows = [];
     for (const key of keys) {
         try {
-            const day = key === state.day.key ? state.day : await state.store.openDay(key, false);
+            const day = key === state.day.key ? state.day : await state.store.openDay(key, key === state.todayKey);
             const sum = summarizeDay(day);
-            if (sum.items) rows.push(sum);
+            if (sum.items || key === state.todayKey) { rows.push(sum); days.set(key, day); }
         } catch {
             // an unreadable day is skipped
         }
@@ -634,12 +601,22 @@ async function openHistory() {
     rows.sort((a, b) => (a.key < b.key ? 1 : -1));
     $('history-rows').replaceChildren(...rows.map(sum => {
         const tr = el('tr');
+        const pickCell = el('td');
+        const box = el('input');
+        box.type = 'checkbox';
+        box.className = 'pick';
+        box.value = sum.key;
+        box.disabled = includedEvents(days.get(sum.key)).length === 0;
+        box.checked = sum.key === state.day.key && !box.disabled;
+        box.setAttribute('aria-label', t('history.select', { day: sum.key }));
+        pickCell.addEventListener('click', e => e.stopPropagation());
+        pickCell.appendChild(box);
         const link = el('button', '', sum.key);
         link.type = 'button';
         link.setAttribute('aria-label', t('history.open', { day: sum.key }));
         const first = el('td');
         first.appendChild(link);
-        tr.appendChild(first);
+        tr.append(pickCell, first);
         for (const text of [sum.speech, sum.screenshot, sum.file, sum.note, formatDuration(sum.spanMs), formatDuration(sum.audioMs), formatShare(sum.share)]) {
             tr.appendChild(el('td', 'num', String(text)));
         }
@@ -653,23 +630,29 @@ async function openHistory() {
         });
         return tr;
     }));
-    $('history-table').hidden = rows.length === 0;
-    $('history-empty').hidden = rows.length > 0;
+
+    const chosen = () => [...$('history-rows').querySelectorAll('input.pick:checked')].map(b => days.get(b.value));
+    const refresh = () => {
+        const picked = chosen();
+        const bytes = estimateBytes(picked);
+        let text = picked.length ? t('export.size', { size: formatSize(bytes) }) : t('export.nodays');
+        if (bytes > BLOCK_BYTES) text += ` ${t('export.block')}`;
+        else if (bytes > WARN_BYTES) text += ` ${t('export.warn')}`;
+        $('history-summary').textContent = text;
+        $('history-download').disabled = !picked.length || bytes > BLOCK_BYTES;
+    };
+    $('history-rows').onchange = refresh;
+    $('history-download').onclick = async () => { const picked = chosen(); $('history-dialog').close(); await exportDays(picked); };
+    refresh();
     $('history-dialog').showModal();
 }
 
 // ---- Days ----------------------------------------------------------------
-async function refreshDays() {
-    const keys = new Set(await state.store.listDays());
-    keys.add(state.todayKey);
-    keys.add(state.day.key);
-    const select = $('day-select');
-    select.replaceChildren(...[...keys].sort().reverse().map(k => {
-        const o = el('option', '', k === state.todayKey ? `${k} ${t('toolbar.today')}` : k);
-        o.value = k;
-        return o;
-    }));
-    select.value = state.day.key;
+function showDay() {
+    const button = $('day-button');
+    button.textContent = state.day.key === state.todayKey ? t('toolbar.today') : state.day.key;
+    button.dataset.day = state.day.key;
+    button.title = t('toolbar.pickDay');
 }
 
 // A recording that was cut off (for example by a crash) before any text arrived leaves an empty item behind.
@@ -688,7 +671,7 @@ async function openDay(key) {
     state.filter = 'all';
     state.selected.clear();
     document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.filter === 'all')));
-    await refreshDays();
+    showDay();
     render();
 }
 
@@ -698,7 +681,7 @@ function startDayRollover() {
         if (now === state.todayKey) return;
         const wasViewingToday = state.day.key === state.todayKey;
         state.todayKey = now;
-        if (wasViewingToday) await openDay(now); else await refreshDays();
+        if (wasViewingToday) await openDay(now); else showDay();
         toast(t('toast.newDay'));
     }, 30000);
 }
@@ -762,7 +745,7 @@ function changeSetting(patch) {
     if (uiChanged) {
         setLang(settings.uiLang);
         applyI18n();
-        if (state.day) { refreshDays(); render(); }
+        if (state.day) { showDay(); render(); }
         updateShareUi();
     }
     renderSettings();
@@ -842,14 +825,14 @@ async function start(handle) {
     $('gate').hidden = true;
     $('app').hidden = false;
     $('bar').hidden = false;
-    await refreshDays();
+    showDay();
     render();
     if (!start.rolloverStarted) { start.rolloverStarted = true; startDayRollover(); }
 }
 
 async function init() {
     applyI18n();
-    if (!('documentPictureInPicture' in window)) revealShotButton();
+    if (!('documentPictureInPicture' in window)) revealWidgetFallbacks();
     renderSettings();
     updateShareUi();
     if (!('showDirectoryPicker' in window)) {
@@ -870,11 +853,9 @@ async function init() {
 // ---- Wiring --------------------------------------------------------------
 $('shot').addEventListener('click', () => takeScreenshot());
 $('zip-main').addEventListener('click', () => exportDays([state.day]));
-$('export-more').addEventListener('click', () => openExportDialog().catch(err => toast(t('export.failed', { error: err.message }))));
-$('export-cancel').addEventListener('click', () => $('export-dialog').close());
 $('open-widget').addEventListener('click', () => widget.open().catch(err => toast(t('toast.widgetFailed', { error: err.message }))));
 $('change-folder').addEventListener('click', async () => { $('settings-dialog').close(); await flush(); await choose(); });
-$('day-select').addEventListener('change', e => openDay(e.target.value).catch(err => toast(t('toast.dayOpenFailed', { error: err.message }))));
+$('day-button').addEventListener('click', () => openHistory().catch(err => toast(t('toast.dayOpenFailed', { error: err.message }))));
 
 $('purge').addEventListener('click', async () => {
     if (!confirm(t('confirm.purge'))) return;
@@ -896,7 +877,7 @@ $('delete-day').addEventListener('click', async () => {
         releaseUrls();
         state.selected.clear();
         state.day = await state.store.openDay(state.todayKey);
-        await refreshDays();
+        showDay();
         render();
         toast(t('toast.dayDeleted', { key }));
     } catch (err) {
@@ -959,9 +940,17 @@ $('file-input').addEventListener('change', ev => {
     ev.target.value = '';
 });
 
-const drop = $('drop');
-['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
-['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', e => { if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]); });
+$('add-files').addEventListener('click', () => $('file-input').click());
+
+// Files can be dropped anywhere on the page; otherwise the browser would open the file instead.
+const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+document.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); document.body.classList.add('dragging-files'); } });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging-files'); });
+document.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.remove('dragging-files');
+    if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]);
+});
 
 init();

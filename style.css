@@ -32,8 +32,7 @@ button.chip { border: 0; border-bottom: 2px solid transparent; border-radius: 0;
 button.chip:hover { background: transparent; color: var(--ink); }
 button.chip[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
 
-.drop { border: 1px dashed var(--muted); padding: 12px; text-align: center; color: var(--muted); margin-bottom: 18px; font-size: 14px; }
-.drop.over { border-color: var(--pine); background: var(--card); color: var(--ink); }
+body.dragging-files::after { content: ""; position: fixed; inset: 0; border: 3px dashed var(--pine); background: rgba(240, 220, 154, 0.25); pointer-events: none; z-index: 30; }
 
 /* ledger */
 ul.timeline { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--ink); }
@@ -83,8 +82,9 @@ select { font: inherit; padding: 4px 8px; border: 1px solid var(--ink); border-r
 .note-form { display: flex; gap: 8px; margin-bottom: 12px; }
 .note-form input { flex: 1; font: inherit; padding: 7px 10px; border: 1px solid var(--rule); border-radius: 2px; background: var(--card); color: var(--ink); }
 .note-form input:focus { outline: 2px solid var(--pine); border-color: var(--pine); }
-.file-label { color: var(--pine); text-decoration: underline; cursor: pointer; }
-.file-label input { display: none; }
+.day-button { font-family: var(--serif); font-size: 18px; font-weight: 700; background: none; border: 0; padding: 2px 4px; color: var(--ink); cursor: pointer; }
+.day-button:hover { text-decoration: underline; }
+.day-button::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 9px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-3px) rotate(45deg); }
 
 /* header share control */
 header { flex-wrap: wrap; row-gap: 8px; }
@@ -117,6 +117,7 @@ button.thumb img { border: 0; }
 .dialog::backdrop { background: rgba(29, 27, 22, 0.55); }
 .dialog h2 { font-family: var(--serif); margin: 0 0 12px; font-size: 22px; }
 .dialog p { line-height: 1.5; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .history-scroll { max-height: 55vh; overflow: auto; border-top: 1px solid var(--ink); }
 table.history { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.history th, table.history td { padding: 8px 10px; border-bottom: 1px solid var(--rule); text-align: left; white-space: nowrap; }
@@ -134,8 +135,6 @@ fieldset { border: 1px solid var(--rule); padding: 10px 14px; }
 .mask-screens li { margin: 4px 0; }
 legend { font-size: 14px; padding: 0 6px; }
 #mask-canvas { width: 100%; border: 1px solid var(--ink); cursor: crosshair; touch-action: none; }
-.export-days { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; border-top: 1px solid var(--rule); }
-.export-days li { padding: 6px 0; border-bottom: 1px solid var(--rule); }
 
 /* viewer */
 .viewer { border: 0; padding: 0; background: #111; color: #eee; width: 96vw; max-width: 96vw; height: 94vh; max-height: 94vh; }

@@ -87,7 +87,13 @@ export class SpeechSession {
         this.#spawn();
     }
 
+    // Shown in the browser console (F12) so a failing session can be explained afterwards.
+    #diag(what) {
+        console.info(`[speech] ${what} (${this.now() - this.startedAt} ms into the session, ${this.failures} failures)`);
+    }
+
     #fatal(kind) {
+        this.#diag(`stopped for good: ${kind}`);
         this.stop({ discard: true });
         this.onError(kind);
     }
@@ -121,6 +127,7 @@ export class SpeechSession {
 
         rec.onerror = ev => {
             if (this.recognition !== rec) return;
+            this.#diag(`error ${ev.error}${ev.message ? ` - ${ev.message}` : ''}`);
             switch (ev.error) {
                 case 'no-speech':
                 case 'aborted':
@@ -144,6 +151,7 @@ export class SpeechSession {
         rec.onend = () => {
             if (this.recognition !== rec || !this.wanted) return;
             this.recognition = null;
+            this.#diag('session ended');
             if (this.now() - this.startedAt < this.quickEndMs) this.failures++;
             if (this.failures >= this.maxFailures) {
                 const kind = this.network ? 'network' : 'failing';
@@ -156,9 +164,10 @@ export class SpeechSession {
 
         try {
             rec.start();
-        } catch {
+        } catch (err) {
             this.recognition = null;
             this.failures++;
+            this.#diag(`start failed: ${err && err.name}`);
             if (this.failures >= this.maxFailures) {
                 this.#fatal('failing');
             } else {

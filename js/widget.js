@@ -1,15 +1,17 @@
-// The floating always-on-top widget (Document Picture-in-Picture): three icons.
-// Left-click acts (screenshot, start/stop speech, add files); right-click opens the options of that icon.
+// The floating always-on-top widget (Document Picture-in-Picture): four icons.
+// Left-click acts (screenshot, start/stop speech, add files, write a note); right-click opens the options of that icon.
 import { t } from './i18n.js';
 
 const SVG_OPEN = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">';
 const ICONS = {
     cam: `${SVG_OPEN}<path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
     mic: `${SVG_OPEN}<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg>`,
-    file: `${SVG_OPEN}<path d="M3 6h6l2 2h10v11H3z"/></svg>`
+    file: `${SVG_OPEN}<path d="M3 6h6l2 2h10v11H3z"/></svg>`,
+    note: `${SVG_OPEN}<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg>`
 };
 
-const BASE_SIZE = { width: 232, height: 92 };
+const BASE_SIZE = { width: 296, height: 92 };
+const NOTE_SIZE = { width: 460, height: 340 };
 const MENU_HEIGHT = 300;
 
 const CSS = `
@@ -25,11 +27,16 @@ const CSS = `
     .icon.fail, .icon.fail:hover { background: #b8321f; border-color: #b8321f; color: #fff; }
     .icon.fail small { color: #fff; }
     .over { background: #f0dc9a; }
-    .menu { position: absolute; left: 6px; right: 6px; top: 82px; background: #faf8f2; border: 1px solid #1d1b16; z-index: 5; padding: 4px 0; }
-    .menu button { display: block; width: 100%; text-align: left; padding: 6px 12px 6px 28px; border: 0; background: none; font: 13px "Segoe UI", sans-serif; color: #1d1b16; cursor: pointer; position: relative; }
-    .menu button:hover { background: #f0dc9a; }
-    .menu button[aria-checked="true"]::before { content: ""; position: absolute; left: 10px; top: 50%; width: 7px; height: 7px; margin-top: -4px; background: #2d5a4c; border-radius: 50%; }
-    .menu hr { border: 0; border-top: 1px solid #cbc3b0; margin: 4px 0; }
+    .editor { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #f1ede3; z-index: 10; box-sizing: border-box; }
+    .editor h2 { margin: 0; font: 600 14px "Segoe UI", sans-serif; }
+    .editor textarea { flex: 1; resize: none; padding: 8px; border: 1px solid #cbc3b0; border-radius: 2px; background: #faf8f2; color: #1d1b16; font: 14px/1.45 "Segoe UI", sans-serif; }
+    .editor textarea:focus { outline: 2px solid #2d5a4c; border-color: #2d5a4c; }
+    .editor .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+    .editor button { padding: 6px 16px; border: 1px solid #1d1b16; border-radius: 2px; background: #faf8f2; color: #1d1b16; font: 13px "Segoe UI", sans-serif; cursor: pointer; }
+    .editor button:hover:not(:disabled) { background: #fff; }
+    .editor button.primary { background: #2d5a4c; border-color: #2d5a4c; color: #fff; }
+    .editor button:disabled { opacity: 0.5; cursor: default; }
+    .editor button.fail { background: #b8321f; border-color: #b8321f; color: #fff; }
 `;
 
 // Icons are constant SVG text; they are parsed as XML into the widget's document (no HTML injection involved).
@@ -40,6 +47,8 @@ export function createWidget(api) {
     let els = null;
     let menu = null;
     let restoreSize = null;
+    let editor = null;
+    let editorSize = null;
 
     const isOpen = () => !!win && !win.closed;
 
@@ -97,6 +106,68 @@ export function createWidget(api) {
         ]);
     }
 
+    // A larger writing area for a note: the widget grows while it is open and returns to its size afterwards.
+    function openEditor() {
+        if (editor) { editor.querySelector('textarea').focus(); return; }
+        const d = win.document;
+        closeMenu();
+        editorSize = { width: win.outerWidth, height: win.outerHeight };
+        try { win.resizeTo(Math.max(editorSize.width, NOTE_SIZE.width), Math.max(editorSize.height, NOTE_SIZE.height)); } catch { /* the browser does not allow resizing */ }
+
+        editor = d.createElement('div');
+        editor.className = 'editor';
+        editor.setAttribute('role', 'dialog');
+        editor.setAttribute('aria-label', t('widget.noteTitle'));
+        const title = d.createElement('h2');
+        title.textContent = t('widget.noteTitle');
+        const text = d.createElement('textarea');
+        text.id = 'w-note-text';
+        text.placeholder = t('widget.notePlaceholder');
+        const buttons = d.createElement('div');
+        buttons.className = 'buttons';
+        const cancel = d.createElement('button');
+        cancel.type = 'button';
+        cancel.id = 'w-note-cancel';
+        cancel.textContent = t('widget.noteCancel');
+        const save = d.createElement('button');
+        save.type = 'button';
+        save.id = 'w-note-save';
+        save.className = 'primary';
+        save.textContent = t('widget.noteSave');
+        save.title = 'Ctrl+Enter';
+        save.disabled = true;
+        buttons.append(cancel, save);
+        editor.append(title, text, buttons);
+        d.body.appendChild(editor);
+        text.focus();
+
+        const doSave = async () => {
+            if (save.disabled) return;
+            save.disabled = true;
+            const saved = await api.addNote(text.value);
+            if (saved) { closeEditor(); return; }
+            save.disabled = !text.value.trim();
+            save.classList.add('fail');
+            win.setTimeout(() => save.classList.remove('fail'), 1000);
+        };
+        text.addEventListener('input', () => { save.disabled = !text.value.trim(); });
+        text.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); doSave(); }
+        });
+        cancel.addEventListener('click', closeEditor);
+        save.addEventListener('click', doSave);
+    }
+
+    function closeEditor() {
+        if (!editor) return;
+        editor.remove();
+        editor = null;
+        if (editorSize && isOpen()) {
+            try { win.resizeTo(editorSize.width, editorSize.height); } catch { /* the browser does not allow resizing */ }
+        }
+        editorSize = null;
+    }
+
     function build(d) {
         d.title = 'CAPture';
         const style = d.createElement('style');
@@ -135,11 +206,12 @@ export function createWidget(api) {
         els = {
             cam: icon('cam', () => api.camera(), cameraMenu),
             mic: icon('mic', () => api.toggleMic(), micMenu),
-            file: icon('file', () => fileInput.click(), null)
+            file: icon('file', () => fileInput.click(), null),
+            note: icon('note', () => openEditor(), null)
         };
 
         d.addEventListener('keydown', ev => {
-            if (ev.key === 'Escape' && menu) closeMenu();
+            if (ev.key === 'Escape') { if (menu) closeMenu(); else closeEditor(); }
         });
         d.addEventListener('click', ev => { if (menu && !menu.contains(ev.target)) closeMenu(); });
         d.body.addEventListener('dragover', ev => { ev.preventDefault(); d.body.classList.add('over'); });
@@ -168,6 +240,9 @@ export function createWidget(api) {
 
         els.file.title = t('widget.fileTitle');
         caption(els.file).textContent = t('widget.fileCaption');
+
+        els.note.title = t('widget.noteTitle');
+        caption(els.note).textContent = t('widget.noteCaption');
     }
 
     // Turns one icon green ('ok') or red ('fail') for a second, as a quiet answer to what the user just did.
@@ -184,7 +259,7 @@ export function createWidget(api) {
         const w = await window.documentPictureInPicture.requestWindow(BASE_SIZE);
         win = w;
         build(w.document);
-        w.addEventListener('pagehide', () => { if (win === w) { win = null; els = null; menu = null; } });
+        w.addEventListener('pagehide', () => { if (win === w) { win = null; els = null; menu = null; editor = null; editorSize = null; } });
         render();
     }
 
